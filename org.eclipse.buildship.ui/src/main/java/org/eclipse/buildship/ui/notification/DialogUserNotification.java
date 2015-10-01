@@ -11,35 +11,50 @@
 
 package org.eclipse.buildship.ui.notification;
 
-import org.eclipse.buildship.core.notification.UserNotification;
+import java.util.concurrent.atomic.AtomicReference;
+
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.PlatformUI;
 
+import org.eclipse.buildship.core.notification.UserNotification;
+
 /**
- * Implementation of the {@link UserNotification} interface that displays all notifications in a dialog.
+ * Implementation of the {@link UserNotification} interface that displays all notifications in a
+ * dialog.
  */
 public final class DialogUserNotification implements UserNotification {
 
-    private volatile ExceptionDetailsDialog dialog;
+    private final AtomicReference<ExceptionDetailsDialog> dialogReference = new AtomicReference<ExceptionDetailsDialog>();
 
     @Override
-    public void errorOccurred(final String headline, final String message, final String details, final int severity,
-            final Throwable... throwables) {
-        PlatformUI.getWorkbench().getDisplay().syncExec(new Runnable() {
+    public void errorOccurred(final String headline, final String message, final String details, final int severity, final Throwable throwable) {
+        PlatformUI.getWorkbench().getDisplay().asyncExec(new Runnable() {
 
             @Override
             public void run() {
                 Shell shell = PlatformUI.getWorkbench().getDisplay().getActiveShell();
-                if (DialogUserNotification.this.dialog == null || DialogUserNotification.this.dialog.getShell() == null
-                        || DialogUserNotification.this.dialog.getShell().isDisposed()) {
-                    DialogUserNotification.this.dialog = new ExceptionDetailsDialog(shell, headline, message, details,
-                            severity, throwables);
-                    DialogUserNotification.this.dialog.open();
+                if (noDialogVisible()) {
+                    showNewDialog(shell, headline, message, details, severity, throwable);
                 } else {
-                    DialogUserNotification.this.dialog.addException(throwables);
+                    addThrowableToDialog(throwable);
                 }
             }
         });
+    }
+
+    private boolean noDialogVisible() {
+        ExceptionDetailsDialog dialog = this.dialogReference.get();
+        return dialog == null || dialog.getShell() == null || dialog.getShell().isDisposed();
+    }
+
+    private void showNewDialog(Shell shell, final String headline, final String message, final String details, final int severity, final Throwable throwable) {
+        ExceptionDetailsDialog dialog = new ExceptionDetailsDialog(shell, headline, message, details, severity, throwable);
+        this.dialogReference.set(dialog);
+        dialog.open();
+    }
+
+    private void addThrowableToDialog(final Throwable throwable) {
+        this.dialogReference.get().addException(throwable);
     }
 
 }

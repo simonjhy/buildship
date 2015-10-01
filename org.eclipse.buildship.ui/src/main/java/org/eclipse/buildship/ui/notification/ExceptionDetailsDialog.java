@@ -14,31 +14,27 @@ package org.eclipse.buildship.ui.notification;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.io.Writer;
-import java.util.List;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 
-import org.eclipse.buildship.core.GradlePluginsRuntimeException;
-import org.eclipse.buildship.ui.i18n.UiMessages;
-import org.eclipse.buildship.ui.util.font.FontUtils;
-import org.eclipse.buildship.ui.util.test.SWTBotWidgetIdentifierKey;
-import org.eclipse.core.databinding.beans.PojoProperties;
-import org.eclipse.core.databinding.observable.list.IListChangeListener;
-import org.eclipse.core.databinding.observable.list.IObservableList;
-import org.eclipse.core.databinding.observable.list.ListChangeEvent;
-import org.eclipse.core.databinding.property.Properties;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.FluentIterable;
+
 import org.eclipse.core.runtime.IStatus;
-import org.eclipse.jface.databinding.viewers.ViewerSupport;
 import org.eclipse.jface.dialogs.Dialog;
 import org.eclipse.jface.dialogs.IDialogConstants;
 import org.eclipse.jface.layout.GridDataFactory;
+import org.eclipse.jface.viewers.ArrayContentProvider;
 import org.eclipse.jface.viewers.ISelection;
 import org.eclipse.jface.viewers.ISelectionChangedListener;
 import org.eclipse.jface.viewers.IStructuredSelection;
+import org.eclipse.jface.viewers.LabelProvider;
 import org.eclipse.jface.viewers.SelectionChangedEvent;
-import org.eclipse.jface.viewers.StructuredSelection;
-import org.eclipse.jface.viewers.StructuredViewer;
 import org.eclipse.jface.viewers.TableViewer;
 import org.eclipse.jface.window.SameShellProvider;
 import org.eclipse.swt.SWT;
+import org.eclipse.swt.custom.StackLayout;
 import org.eclipse.swt.dnd.Clipboard;
 import org.eclipse.swt.dnd.TextTransfer;
 import org.eclipse.swt.dnd.Transfer;
@@ -50,15 +46,17 @@ import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
+import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.ui.ISharedImages;
 import org.eclipse.ui.PlatformUI;
 
-import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
+import org.eclipse.buildship.core.GradlePluginsRuntimeException;
+import org.eclipse.buildship.ui.UiPlugin;
+import org.eclipse.buildship.ui.i18n.UiMessages;
+import org.eclipse.buildship.ui.util.font.FontUtils;
 
 /**
  * Custom {@link Dialog} implementation showing an exception and its stacktrace.
@@ -72,50 +70,28 @@ public final class ExceptionDetailsDialog extends Dialog {
     private final String title;
     private final String message;
     private final String details;
-    private final IObservableList throwables;
+    private final Collection<Throwable> throwables;
 
     private Button detailsButton;
-    private Control stackTraceArea;
-
+    private Control stackTraceAreaControl;
+    private Label singleErrorMessageLabel;
+    private TableViewer multiErrorExceptionList;
+    private Label singleErrorDetailsLabel;
+    private Label multiErrorMessageLabel;
     private Clipboard clipboard;
-    private Text detailText;
-    private StructuredViewer errorViewer;
+    private Text stacktraceAreaText;
+    private Composite singleErrorContainer;
+    private Composite multiErrorContainer;
+    private StackLayout stackLayout;
 
-    public ExceptionDetailsDialog(Shell shell, String title, String message, String details, int severity,
-            Throwable... throwable) {
+    public ExceptionDetailsDialog(Shell shell, String title, String message, String details, int severity, Throwable throwable) {
         super(new SameShellProvider(shell));
 
         this.image = getIconForSeverity(severity, shell);
         this.title = Preconditions.checkNotNull(title);
         this.message = Preconditions.checkNotNull(message);
         this.details = Preconditions.checkNotNull(details);
-
-        this.throwables = Properties.selfList(Throwable.class)
-                .observe(Lists.newArrayList(Preconditions.checkNotNull(throwable)));
-
-        this.throwables.addListChangeListener(new IListChangeListener() {
-
-            @Override
-            public void handleListChange(ListChangeEvent event) {
-
-                if (isMultiErrorDialog()) {
-                    if (ExceptionDetailsDialog.this.errorViewer == null
-                            || ExceptionDetailsDialog.this.errorViewer.getControl() == null
-                            || ExceptionDetailsDialog.this.errorViewer.getControl().isDisposed()) {
-                        // dispose the contents of the single error dialog ...
-                        Composite dialogAreaComposite = (Composite) ExceptionDetailsDialog.this.dialogArea;
-                        Control[] children = dialogAreaComposite.getChildren();
-                        for (Control control : children) {
-                            control.dispose();
-                        }
-                        // ... and create the MultiErrorDialog
-                        createMultiErrorDialog(dialogAreaComposite);
-                        relayoutShell();
-                    }
-                }
-
-            }
-        });
+        this.throwables = new ArrayList<Throwable>(Arrays.asList(throwable));
 
         setShellStyle(SWT.DIALOG_TRIM | SWT.RESIZE | SWT.APPLICATION_MODAL);
     }
@@ -123,19 +99,20 @@ public final class ExceptionDetailsDialog extends Dialog {
     private Image getIconForSeverity(int severity, Shell shell) {
         int swtImageKey;
         switch (severity) {
-        case IStatus.OK:
-        case IStatus.INFO:
-            swtImageKey = SWT.ICON_INFORMATION;
-            break;
-        case IStatus.WARNING:
-        case IStatus.CANCEL:
-            swtImageKey = SWT.ICON_WARNING;
-            break;
-        case IStatus.ERROR:
-            swtImageKey = SWT.ICON_ERROR;
-            break;
-        default:
-            throw new GradlePluginsRuntimeException("Can't find image for severity: " + severity); //$NON-NLS-1$
+            case IStatus.OK:
+            case IStatus.INFO:
+                swtImageKey = SWT.ICON_INFORMATION;
+                break;
+            case IStatus.WARNING:
+            case IStatus.CANCEL:
+                swtImageKey = SWT.ICON_WARNING;
+                break;
+            case IStatus.ERROR:
+                swtImageKey = SWT.ICON_ERROR;
+                break;
+            default:
+                swtImageKey = SWT.ICON_WARNING;
+                UiPlugin.logger().error("Can't find image for severity: " + severity);
         }
 
         return shell.getDisplay().getSystemImage(swtImageKey);
@@ -150,95 +127,110 @@ public final class ExceptionDetailsDialog extends Dialog {
 
     @Override
     protected Control createDialogArea(Composite parent) {
-        Composite container = (Composite) super.createDialogArea(parent);
-        ((GridLayout) container.getLayout()).numColumns = 2;
-        container.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
-
-        if (isMultiErrorDialog()) {
-            createMultiErrorDialog(container);
-        } else {
-            createSingleErrorDialog(container);
-        }
-
-        this.clipboard = new Clipboard(getShell().getDisplay());
-
-        return container;
-    }
-
-    private void createMultiErrorDialog(Composite container) {
-
-        // change the title of the shell
-        getShell().setText(UiMessages.Dialog_Title_Multiple_Error);
+        Composite dialogArea = (Composite) super.createDialogArea(parent);
+        dialogArea.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
 
         // dialog image
-        Label imageLabel = new Label(container, 0);
-        this.image.setBackground(imageLabel.getBackground());
-        imageLabel.setImage(this.image);
-        imageLabel.setLayoutData(new GridData(GridData.HORIZONTAL_ALIGN_CENTER | GridData.VERTICAL_ALIGN_BEGINNING));
-
-        // message label
-        Label messageLabel = new Label(container, SWT.WRAP);
-        messageLabel.setText(this.message);
-        GridDataFactory.swtDefaults().align(SWT.FILL, SWT.TOP).grab(true, false).applyTo(messageLabel);
-
-        this.errorViewer = new TableViewer(container);
-        this.errorViewer.getControl().setData(SWTBotWidgetIdentifierKey.DEFAULT_KEY,
-                ExceptionDetailsDialog.class.getName() + "TableViewer:errorViewer"); //$NON-NLS-1$
-        GridDataFactory.fillDefaults().grab(true, true).hint(SWT.DEFAULT, 80).span(2, 1)
-                .applyTo(this.errorViewer.getControl());
-        ViewerSupport.bind(this.errorViewer, this.throwables, PojoProperties.value("message")); //$NON-NLS-1$
-        this.errorViewer.addSelectionChangedListener(new ISelectionChangedListener() {
-
-            @Override
-            public void selectionChanged(SelectionChangedEvent event) {
-                if (ExceptionDetailsDialog.this.detailText != null
-                        && !ExceptionDetailsDialog.this.detailText.isDisposed()) {
-                    ExceptionDetailsDialog.this.detailText.setText(getStackTrace(getSelectedThrowables()));
-                }
-            }
-        });
-    }
-
-    private void createSingleErrorDialog(Composite container) {
-        // dialog image
-        Label imageLabel = new Label(container, 0);
+        ((GridLayout) dialogArea.getLayout()).numColumns = 2;
+        Label imageLabel = new Label(dialogArea, 0);
         this.image.setBackground(imageLabel.getBackground());
         imageLabel.setImage(this.image);
         imageLabel.setLayoutData(new GridData(GridData.HORIZONTAL_ALIGN_CENTER | GridData.VERTICAL_ALIGN_BEGINNING));
 
         // composite to include all text widgets
-        Composite textArea = new Composite(container, SWT.NONE);
+        Composite textArea = new Composite(dialogArea, SWT.NONE);
         GridLayout textAreaLayout = new GridLayout(1, false);
-        textAreaLayout.verticalSpacing = FontUtils.getFontHeightInPixels(container.getFont());
+        textAreaLayout.verticalSpacing = FontUtils.getFontHeightInPixels(parent.getFont());
+        textAreaLayout.marginWidth = textAreaLayout.marginHeight = 0;
         textArea.setLayout(textAreaLayout);
         GridData textAreaLayoutData = new GridData(SWT.FILL, SWT.FILL, true, true, 1, 1);
         textAreaLayoutData.widthHint = convertHorizontalDLUsToPixels(IDialogConstants.MINIMUM_MESSAGE_AREA_WIDTH);
         textArea.setLayoutData(textAreaLayoutData);
 
-        // message label
-        Label messageLabel = new Label(textArea, SWT.WRAP);
-        messageLabel.setText(this.message);
+        Composite stackLayoutContainer = new Composite(textArea, SWT.NONE);
+        this.stackLayout = new StackLayout();
+        stackLayoutContainer.setLayout(this.stackLayout);
+        stackLayoutContainer.setLayoutData(new GridData(GridData.FILL_BOTH));
+
+        // single error container
+        this.singleErrorContainer = new Composite(stackLayoutContainer, SWT.NONE);
+        GridLayout singleErrorContainerLayout = new GridLayout(1, false);
+        singleErrorContainerLayout.marginWidth = singleErrorContainerLayout.marginHeight = 0;
+        this.singleErrorContainer.setLayout(singleErrorContainerLayout);
+        this.stackLayout.topControl = this.singleErrorContainer;
+
+        // single error label
+        this.singleErrorMessageLabel = new Label(this.singleErrorContainer, SWT.WRAP);
         GridData messageLabelGridData = new GridData();
         messageLabelGridData.verticalAlignment = SWT.TOP;
         messageLabelGridData.grabExcessHorizontalSpace = true;
-        messageLabel.setLayoutData(messageLabelGridData);
+        this.singleErrorMessageLabel.setLayoutData(messageLabelGridData);
 
-        // details label
-        Label detailsLabel = new Label(textArea, SWT.WRAP);
-        detailsLabel.setText(this.details);
+        // single error details
+        this.singleErrorDetailsLabel = new Label(this.singleErrorContainer, SWT.WRAP);
         GridData detailsLabelGridData = new GridData();
         detailsLabelGridData.verticalAlignment = SWT.TOP;
         detailsLabelGridData.grabExcessHorizontalSpace = true;
-        detailsLabel.setLayoutData(detailsLabelGridData);
+        this.singleErrorDetailsLabel.setLayoutData(detailsLabelGridData);
+
+        // multi error container
+        this.multiErrorContainer = new Composite(stackLayoutContainer, SWT.NONE);
+        GridLayout multiErrorContainerLayout = new GridLayout(1, false);
+        multiErrorContainerLayout.marginWidth = multiErrorContainerLayout.marginHeight = 0;
+        this.multiErrorContainer.setLayout(multiErrorContainerLayout);
+
+        // multi error label
+        this.multiErrorMessageLabel = new Label(this.multiErrorContainer, SWT.WRAP);
+        this.multiErrorMessageLabel.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
+
+        // multi error messages displayed in a list viewer
+        GridData multiErrorExceptionListGridData = new GridData();
+        multiErrorExceptionListGridData.horizontalAlignment = SWT.FILL;
+        multiErrorExceptionListGridData.verticalAlignment = SWT.TOP;
+        multiErrorExceptionListGridData.grabExcessHorizontalSpace = true;
+        multiErrorExceptionListGridData.widthHint = 800;
+        this.multiErrorExceptionList = new TableViewer(this.multiErrorContainer, SWT.MULTI);
+        this.multiErrorExceptionList.getControl().setLayoutData(multiErrorExceptionListGridData);
+        this.multiErrorExceptionList.setContentProvider(new ArrayContentProvider());
+        this.multiErrorExceptionList.setLabelProvider(new LabelProvider() {
+
+            @Override
+            public String getText(Object element) {
+                if (element instanceof Throwable) {
+                    return ((Throwable) element).getMessage();
+                } else {
+                    return "";
+                }
+            }
+        });
+        this.multiErrorExceptionList.addSelectionChangedListener(new ISelectionChangedListener() {
+
+            @Override
+            public void selectionChanged(SelectionChangedEvent event) {
+                if (ExceptionDetailsDialog.this.stacktraceAreaText != null && ExceptionDetailsDialog.this.stacktraceAreaText.isDisposed()) {
+                    ISelection selection = event.getSelection();
+                    String stackTraces = collectStackTraces(collectSelectedExceptions(selection));
+                    ExceptionDetailsDialog.this.stacktraceAreaText.setText(stackTraces);
+                }
+            }
+        });
+
+        // set clipboard
+        this.clipboard = new Clipboard(getShell().getDisplay());
+
+        // after widget creation update the contents
+        updateWidgetText();
+        updatePresentationMode();
+
+        return dialogArea;
     }
 
     @Override
     protected void createButtonsForButtonBar(Composite parent) {
-        Button copyExceptionButton = createButton(parent, COPY_EXCEPTION_BUTTON_ID, "", false); //$NON-NLS-1$
+        Button copyExceptionButton = createButton(parent, COPY_EXCEPTION_BUTTON_ID, "", false);
         copyExceptionButton.setToolTipText(UiMessages.Button_CopyFailuresToClipboard_Tooltip);
         copyExceptionButton.setImage(PlatformUI.getWorkbench().getSharedImages().getImage(ISharedImages.IMG_TOOL_COPY));
-        this.detailsButton = createButton(parent, IDialogConstants.DETAILS_ID, IDialogConstants.SHOW_DETAILS_LABEL,
-                false);
+        this.detailsButton = createButton(parent, IDialogConstants.DETAILS_ID, IDialogConstants.SHOW_DETAILS_LABEL, false);
         Button okButton = createButton(parent, IDialogConstants.OK_ID, IDialogConstants.OK_LABEL, true);
         okButton.setFocus();
     }
@@ -246,8 +238,8 @@ public final class ExceptionDetailsDialog extends Dialog {
     @Override
     protected void setButtonLayoutData(Button button) {
         if (button.getData() != null && button.getData().equals(COPY_EXCEPTION_BUTTON_ID)) {
-            // do not set a width hint for the copy error button, like it is
-            // done in the super implementation
+            // do not set a width hint for the copy error button, like it is done in the super
+            // implementation
             GridDataFactory.swtDefaults().applyTo(button);
             return;
         }
@@ -256,8 +248,7 @@ public final class ExceptionDetailsDialog extends Dialog {
 
     @Override
     protected void initializeBounds() {
-        // do not make columns equal width so that we can have a smaller 'copy
-        // failure' button
+        // do not make columns equal width so that we can have a smaller 'copy failure' button
         Composite buttonBar = (Composite) getButtonBar();
         GridLayout layout = (GridLayout) buttonBar.getLayout();
         layout.makeColumnsEqualWidth = false;
@@ -269,62 +260,99 @@ public final class ExceptionDetailsDialog extends Dialog {
         if (id == IDialogConstants.DETAILS_ID) {
             toggleStacktraceArea();
         } else if (id == COPY_EXCEPTION_BUTTON_ID) {
-            List<Throwable> throwables = getSelectedThrowables();
-            copyErrorToClipboard(throwables);
+            copyErrorToClipboard();
         } else {
             super.buttonPressed(id);
         }
     }
 
-    private List<Throwable> getSelectedThrowables() {
-        if (this.errorViewer != null) {
-            ISelection selection = this.errorViewer.getSelection();
-            if (!selection.isEmpty() && selection instanceof IStructuredSelection) {
-                @SuppressWarnings("unchecked")
-                List<Throwable> throwableList = ((IStructuredSelection) selection).toList();
-                return ImmutableList.copyOf(throwableList);
-            } else {
-                // if nothing is selected then select the first throwable
-                Throwable throwable = (Throwable) this.throwables.get(0);
-                this.errorViewer.setSelection(new StructuredSelection(throwable));
-                return ImmutableList.of(throwable);
-            }
+    /**
+     * Adds the target exception to the dialog.
+     *
+     * @param exception the new exception to display.
+     */
+    public void addException(final Throwable exception) {
+        Display display = PlatformUI.getWorkbench().getDisplay();
+        Thread displayThread = display.getThread();
+
+        if (Thread.currentThread().equals(displayThread)) {
+            addExceptionInUiThread(exception);
         } else {
-            // if the errorViewer is not shown there is only one Throwable shown
-            // by this dialog
-            Throwable throwable = (Throwable) this.throwables.get(0);
-            return ImmutableList.of(throwable);
+           throw new GradlePluginsRuntimeException("This method must be called from the UI thread");
         }
     }
 
-    protected boolean isMultiErrorDialog() {
-        return this.throwables.size() > 1;
+    private void addExceptionInUiThread(Throwable exception) {
+        // the exception list always manipulated from the UI thread, therefore no synchronization
+        // is necessary
+        this.throwables.add(exception);
+        if (getContents() != null && !getContents().isDisposed()) {
+            updateWidgetText();
+            updatePresentationMode();
+            relayoutShell();
+        }
     }
 
-    private void copyErrorToClipboard(List<Throwable> throwables) {
+    private Collection<Throwable> collectSelectedExceptions(ISelection selection) {
+        if (selection instanceof IStructuredSelection) {
+            @SuppressWarnings("unchecked")
+            Collection<Throwable> selectedExceptions = FluentIterable.from(((IStructuredSelection) selection).toList()).filter(Throwable.class).toList();
+            if (!selectedExceptions.isEmpty()) {
+                return selectedExceptions;
+            }
+        }
+        // if nothing is selected, then return all available exceptions
+        return this.throwables;
+    }
+
+    private void updatePresentationMode() {
+        if (this.throwables.size() > 1) {
+            this.stackLayout.topControl = this.multiErrorContainer;
+            getShell().setText(UiMessages.Dialog_Title_Multiple_Error);
+        } else {
+            this.stackLayout.topControl = this.singleErrorContainer;
+            getShell().setText(this.title);
+        }
+    }
+
+    private void copyErrorToClipboard() {
         StringBuilder sb = new StringBuilder();
         sb.append(this.message);
         sb.append(LINE_SEPARATOR);
         sb.append(this.details);
         sb.append(LINE_SEPARATOR);
-        sb.append(getStackTrace(throwables));
+        sb.append(collectStackTraces(this.throwables));
 
         this.clipboard.setContents(new String[] { sb.toString() }, new Transfer[] { TextTransfer.getInstance() });
     }
 
     private void toggleStacktraceArea() {
         // show/hide stacktrace
-        if (this.stackTraceArea == null) {
-            this.stackTraceArea = createStacktraceArea((Composite) getContents(), getSelectedThrowables());
+        if (this.stackTraceAreaControl == null) {
+            this.stackTraceAreaControl = createStacktraceArea((Composite) getContents());
             this.detailsButton.setText(IDialogConstants.HIDE_DETAILS_LABEL);
         } else {
-            this.stackTraceArea.dispose();
-            this.stackTraceArea = null;
-            this.detailText = null;
+            this.stackTraceAreaControl.dispose();
+            this.stackTraceAreaControl = null;
             this.detailsButton.setText(IDialogConstants.SHOW_DETAILS_LABEL);
         }
 
         relayoutShell();
+    }
+
+    private Control createStacktraceArea(Composite parent) {
+        // create the stacktrace container area
+        Composite container = new Composite(parent, SWT.NONE);
+        container.setLayoutData(new GridData(GridData.FILL_BOTH));
+        GridLayout containerLayout = new GridLayout();
+        containerLayout.marginHeight = containerLayout.marginWidth = 0;
+        container.setLayout(containerLayout);
+
+        this.stacktraceAreaText = new Text(container, SWT.MULTI | SWT.READ_ONLY | SWT.BORDER | SWT.H_SCROLL | SWT.V_SCROLL);
+        this.stacktraceAreaText.setLayoutData(new GridData(GridData.FILL_BOTH));
+        this.stacktraceAreaText.setText(collectStackTraces(collectSelectedExceptions(this.multiErrorExceptionList.getSelection())));
+
+        return container;
     }
 
     private void relayoutShell() {
@@ -346,32 +374,6 @@ public final class ExceptionDetailsDialog extends Dialog {
         ((Composite) getContents()).layout();
     }
 
-    private Control createStacktraceArea(Composite parent, List<Throwable> throwables) {
-        // create the stacktrace container area
-        Composite container = new Composite(parent, SWT.NONE);
-        container.setLayoutData(new GridData(GridData.FILL_BOTH));
-        GridLayout containerLayout = new GridLayout();
-        containerLayout.marginHeight = containerLayout.marginWidth = 0;
-        container.setLayout(containerLayout);
-
-        // create stacktrace content
-        this.detailText = new Text(container, SWT.MULTI | SWT.READ_ONLY | SWT.BORDER | SWT.H_SCROLL | SWT.V_SCROLL);
-        this.detailText.setLayoutData(new GridData(GridData.FILL_BOTH));
-        this.detailText.setText(getStackTrace(throwables));
-
-        return container;
-    }
-
-    private String getStackTrace(List<Throwable> throwables) {
-        Writer writer = new StringWriter(1000);
-        PrintWriter printWriter = new PrintWriter(writer);
-        for (Throwable throwable : throwables) {
-            throwable.printStackTrace(printWriter);
-            printWriter.write(LINE_SEPARATOR);
-        }
-        return writer.toString();
-    }
-
     @Override
     public boolean close() {
         if (this.clipboard != null) {
@@ -381,8 +383,21 @@ public final class ExceptionDetailsDialog extends Dialog {
         return super.close();
     }
 
-    public void addException(Throwable... throwable) {
-        this.throwables.addAll(ImmutableList.copyOf(throwable));
+    private void updateWidgetText() {
+        this.singleErrorMessageLabel.setText(this.message);
+        this.singleErrorDetailsLabel.setText(this.details);
+        this.multiErrorMessageLabel.setText(this.message);
+        this.multiErrorExceptionList.setInput(this.throwables);
+    }
+
+    private static String collectStackTraces(Collection<Throwable> throwables) {
+        Writer writer = new StringWriter(1024);
+        PrintWriter printWriter = new PrintWriter(writer);
+        for (Throwable throwable : throwables) {
+            throwable.printStackTrace(printWriter);
+            printWriter.write(LINE_SEPARATOR);
+        }
+        return writer.toString();
     }
 
 }

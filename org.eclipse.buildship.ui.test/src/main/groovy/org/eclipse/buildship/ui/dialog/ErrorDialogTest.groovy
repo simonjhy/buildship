@@ -17,131 +17,91 @@ import org.eclipse.buildship.ui.notification.ExceptionDetailsDialog
 import org.eclipse.buildship.ui.test.fixtures.SwtBotSpecification
 import org.eclipse.core.runtime.IStatus
 import org.eclipse.jface.dialogs.IDialogConstants
+import org.eclipse.swt.SWT;
+import org.eclipse.swt.widgets.Display
+import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swtbot.swt.finder.exceptions.WidgetNotFoundException
 import org.eclipse.swtbot.swt.finder.waits.Conditions
 import org.eclipse.swtbot.swt.finder.widgets.SWTBotShell
 import org.eclipse.swtbot.swt.finder.widgets.SWTBotTable
+import org.eclipse.ui.PlatformUI;
+
 
 class ErrorDialogTest extends SwtBotSpecification {
 
-    def "Open ExceptionDetailsDialog with single Throwable without TableViewer for errors"() {
-        setup:
-        // open dialog in a different thread so that the SWTBot is not blocked
-        bot.activeShell().display.asyncExec({
-            def userNatification = CorePlugin.userNotification()
-            userNatification.errorOccurred("headline", 'message', 'details', IStatus.ERROR, new NullPointerException('Self instanciated Buildship NPE'))
-        } as Runnable
-        )
-        when:
-        SWTBotShell shell = bot.shell("headline")
-        shell.activate()
-        bot.waitUntil(Conditions.shellIsActive("headline"))
-        bot.tableWithId(ExceptionDetailsDialog.class.getName() + "TableViewer:errorViewer")
-
-        then:
-        WidgetNotFoundException ex = thrown()
-
-        ex.message == "Could not find widget matching: (of type 'Table' and with key/value (org.eclipse.swtbot.widget.key/org.eclipse.buildship.ui.notification.ExceptionDetailsDialogTableViewer:errorViewer))"
-
-        cleanup:
-        // press ok to close the Exception dialog
+    def cleanup() {
+        // press OK to close the dialog
         bot.button(IDialogConstants.OK_LABEL).click()
     }
 
-    def "Open ExceptionDetailsDialog with multiple Throwables with TableViewer for errors"() {
+    def "Can show a simple message"() {
         setup:
-        // open dialog in a different thread so that the SWTBot is not blocked
-        bot.activeShell().display.asyncExec({
-            def userNatification = CorePlugin.userNotification()
-            userNatification.errorOccurred(UiMessages.Dialog_Title_Multiple_Error, 'message', 'details', IStatus.ERROR, new NullPointerException('Self instanciated Buildship NPE'), new RuntimeException('Self instanciated Buildship RuntimeException'))
-        } as Runnable
-        )
-        when:
-        SWTBotShell shell = bot.shell(UiMessages.Dialog_Title_Multiple_Error)
-        shell.activate()
+        executeInUiThread {
+            ExceptionDetailsDialog dialog = new ExceptionDetailsDialog(PlatformUI.workbench.display.activeShell, 'title', 'message', 'details', IStatus.WARNING, new RuntimeException('text exception'))
+            dialog.open()
+        }
+    }
+
+    def "A table is used to display multiple errors "() {
+        setup:
+         executeInUiThread {
+            ExceptionDetailsDialog dialog = new ExceptionDetailsDialog(PlatformUI.workbench.display.activeShell, 'title', 'message', 'details', IStatus.WARNING, new RuntimeException('first'))
+            dialog.addException(new RuntimeException('second'))
+            dialog.setBlockOnOpen(false)
+            dialog.open()
+        }
         bot.waitUntil(Conditions.shellIsActive(UiMessages.Dialog_Title_Multiple_Error))
-        bot.tableWithId(ExceptionDetailsDialog.class.getName() + "TableViewer:errorViewer")
+
+        when:
+        bot.table()
 
         then:
         notThrown WidgetNotFoundException
-
-        cleanup:
-        // press ok to close the Exception dialog
-        bot.button(IDialogConstants.OK_LABEL).click()
     }
 
-    def "Open ExceptionDetailsDialog, select the second error and show it's details"() {
+    def "When a exception is selected, then the related stacktrace is shown"() {
         setup:
-        // open dialog in a different thread so that the SWTBot is not blocked
-        bot.activeShell().display.asyncExec({
-            def userNatification = CorePlugin.userNotification()
-            userNatification.errorOccurred(UiMessages.Dialog_Title_Multiple_Error, 'message', 'details', IStatus.ERROR, new NullPointerException('Self instanciated Buildship NPE'), new RuntimeException('Self instanciated Buildship RuntimeException'))
-        } as Runnable
-        )
-        SWTBotShell shell = bot.shell(UiMessages.Dialog_Title_Multiple_Error)
-        shell.activate()
+        executeInUiThread {
+            ExceptionDetailsDialog dialog = new ExceptionDetailsDialog(PlatformUI.workbench.display.activeShell, 'title', 'message', 'details', IStatus.WARNING, new RuntimeException('first'))
+            dialog.addException(new RuntimeException('second'))
+            dialog.setBlockOnOpen(false)
+            dialog.open()
+        }
         bot.waitUntil(Conditions.shellIsActive(UiMessages.Dialog_Title_Multiple_Error))
-        SWTBotTable errorTable = bot.tableWithId(ExceptionDetailsDialog.class.getName() + "TableViewer:errorViewer")
+
+        when:
         bot.table().getTableItem(1).select()
-
-        when:
         bot.button(IDialogConstants.SHOW_DETAILS_LABEL).click();
 
-        String text = bot.text().getText();
-
         then:
-        // ensure that only the error of the selected RuntimeException shown in the details text
-        text.contains("RuntimeException")
-
-        !text.contains("NPE")
-
-        cleanup:
-        // press ok to close the Exception dialog
-        bot.button(IDialogConstants.OK_LABEL).click()
+        bot.text().text.contains("second")
+        !bot.text().text.contains("first")
     }
 
-    def "Open ExceptionDetailsDialog with multiple errors and open details without selecting an error"() {
+    def "When no exception is selected, then all stacktraces are shown"() {
         setup:
-        // open dialog in a different thread so that the SWTBot is not blocked
-        bot.activeShell().display.asyncExec({
-            def userNatification = CorePlugin.userNotification()
-            userNatification.errorOccurred(UiMessages.Dialog_Title_Multiple_Error, 'message', 'details', IStatus.ERROR, new NullPointerException('Self instanciated Buildship NPE'), new RuntimeException('Self instanciated Buildship RuntimeException'))
-        } as Runnable
-        )
-        SWTBotShell shell = bot.shell(UiMessages.Dialog_Title_Multiple_Error)
-        shell.activate()
+        executeInUiThread {
+            ExceptionDetailsDialog dialog = new ExceptionDetailsDialog(PlatformUI.workbench.display.activeShell, 'title', 'message', 'details', IStatus.WARNING, new RuntimeException('first'))
+            dialog.addException(new RuntimeException('second'))
+            dialog.setBlockOnOpen(false)
+            dialog.open()
+        }
+
         bot.waitUntil(Conditions.shellIsActive(UiMessages.Dialog_Title_Multiple_Error))
-        SWTBotTable errorTable = bot.tableWithId(ExceptionDetailsDialog.class.getName() + "TableViewer:errorViewer")
 
         when:
-        bot.button(IDialogConstants.SHOW_DETAILS_LABEL).click();
-
-        String text = bot.text().getText();
-
-        String selectionText = "selectionText"
-        String firstItemText = "firstItemText"
-
-        bot.activeShell().display.syncExec(
-                {
-                    selectionText = errorTable.widget.getSelection()[0].getText()
-                    firstItemText = errorTable.getTableItem(0).widget.getText()
-                } as Runnable
-                )
+        bot.button(IDialogConstants.SHOW_DETAILS_LABEL).click()
 
         then:
-        // ensure that the first error in the dialog is selected...
-        errorTable.selectionCount() == 1
-        selectionText == firstItemText
-
-        // ...  and therefore the NPE error is shown in the details text
-        text.contains("NPE")
-
-        !text.contains("RuntimeException")
-
-
-        cleanup:
-        // press ok to close the Exception dialog
-        bot.button(IDialogConstants.OK_LABEL).click()
+        String text = bot.text().getText()
+        text.contains('first')
+        text.contains('second')
     }
+
+    private def executeInUiThread(Closure closure) {
+        // open dialog in a different thread so that the SWTBot is not blocked
+        bot.activeShell().display.asyncExec(closure as Runnable)
+    }
+
 
 }
