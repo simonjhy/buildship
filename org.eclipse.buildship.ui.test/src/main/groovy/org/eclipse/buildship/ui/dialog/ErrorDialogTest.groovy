@@ -14,6 +14,7 @@ package org.eclipse.buildship.ui.dialog
 import org.eclipse.buildship.core.CorePlugin
 import org.eclipse.buildship.ui.i18n.UiMessages
 import org.eclipse.buildship.ui.notification.ExceptionDetailsDialog
+import org.eclipse.buildship.ui.notification.ExceptionDetailsDialog.DialogController;
 import org.eclipse.buildship.ui.test.fixtures.SwtBotSpecification
 import org.eclipse.core.runtime.IStatus
 import org.eclipse.jface.dialogs.IDialogConstants
@@ -37,18 +38,18 @@ class ErrorDialogTest extends SwtBotSpecification {
     def "Can show a simple message"() {
         setup:
         executeInUiThread {
-            ExceptionDetailsDialog dialog = new ExceptionDetailsDialog(PlatformUI.workbench.display.activeShell, 'title', 'message', 'details', IStatus.WARNING, new RuntimeException('text exception'))
-            dialog.open()
+            DialogController controller = ExceptionDetailsDialog.create(PlatformUI.workbench.display.activeShell, 'title', 'message', 'details', IStatus.WARNING, new RuntimeException('text exception'))
+            controller.openDialog()
         }
     }
 
     def "A table is used to display multiple errors "() {
         setup:
          executeInUiThread {
-            ExceptionDetailsDialog dialog = new ExceptionDetailsDialog(PlatformUI.workbench.display.activeShell, 'title', 'message', 'details', IStatus.WARNING, new RuntimeException('first'))
-            dialog.addException(new RuntimeException('second'))
-            dialog.setBlockOnOpen(false)
-            dialog.open()
+            DialogController controller = ExceptionDetailsDialog.create(PlatformUI.workbench.display.activeShell, 'title', 'message', 'details', IStatus.WARNING, new RuntimeException('first'))
+            controller.addException(new RuntimeException('second'))
+            controller.dialog.blockOnOpen = false
+            controller.openDialog()
         }
         bot.waitUntil(Conditions.shellIsActive(UiMessages.Dialog_Title_Multiple_Error))
 
@@ -62,10 +63,10 @@ class ErrorDialogTest extends SwtBotSpecification {
     def "When a exception is selected, then the related stacktrace is shown"() {
         setup:
         executeInUiThread {
-            ExceptionDetailsDialog dialog = new ExceptionDetailsDialog(PlatformUI.workbench.display.activeShell, 'title', 'message', 'details', IStatus.WARNING, new RuntimeException('first'))
-            dialog.addException(new RuntimeException('second'))
-            dialog.setBlockOnOpen(false)
-            dialog.open()
+            DialogController controller = ExceptionDetailsDialog.create(PlatformUI.workbench.display.activeShell, 'title', 'message', 'details', IStatus.WARNING, new RuntimeException('first'))
+            controller.addException(new RuntimeException('second'))
+            controller.dialog.blockOnOpen = false
+            controller.openDialog()
         }
         bot.waitUntil(Conditions.shellIsActive(UiMessages.Dialog_Title_Multiple_Error))
 
@@ -81,10 +82,10 @@ class ErrorDialogTest extends SwtBotSpecification {
     def "When no exception is selected, then all stacktraces are shown"() {
         setup:
         executeInUiThread {
-            ExceptionDetailsDialog dialog = new ExceptionDetailsDialog(PlatformUI.workbench.display.activeShell, 'title', 'message', 'details', IStatus.WARNING, new RuntimeException('first'))
-            dialog.addException(new RuntimeException('second'))
-            dialog.setBlockOnOpen(false)
-            dialog.open()
+            DialogController controller = ExceptionDetailsDialog.create(PlatformUI.workbench.display.activeShell, 'title', 'message', 'details', IStatus.WARNING, new RuntimeException('first'))
+            controller.addException(new RuntimeException('second'))
+            controller.dialog.blockOnOpen = false
+            controller.openDialog()
         }
 
         bot.waitUntil(Conditions.shellIsActive(UiMessages.Dialog_Title_Multiple_Error))
@@ -100,7 +101,7 @@ class ErrorDialogTest extends SwtBotSpecification {
 
     private def executeInUiThread(Closure closure) {
         // open dialog in a different thread so that the SWTBot is not blocked
-        bot.activeShell().display.asyncExec(closure as Runnable)
+        PlatformUI.workbench.display.asyncExec(closure as Runnable)
     }
 
 

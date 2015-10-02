@@ -17,6 +17,7 @@ import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.PlatformUI;
 
 import org.eclipse.buildship.core.notification.UserNotification;
+import org.eclipse.buildship.ui.notification.ExceptionDetailsDialog.DialogController;
 
 /**
  * Implementation of the {@link UserNotification} interface that displays all notifications in a
@@ -24,11 +25,11 @@ import org.eclipse.buildship.core.notification.UserNotification;
  */
 public final class DialogUserNotification implements UserNotification {
 
-    private final AtomicReference<ExceptionDetailsDialog> dialogReference = new AtomicReference<ExceptionDetailsDialog>();
+    private final AtomicReference<DialogController> dialogControllerReference = new AtomicReference<DialogController>();
 
     @Override
     public void errorOccurred(final String headline, final String message, final String details, final int severity, final Throwable throwable) {
-        PlatformUI.getWorkbench().getDisplay().asyncExec(new Runnable() {
+        PlatformUI.getWorkbench().getDisplay().syncExec(new Runnable() {
 
             @Override
             public void run() {
@@ -43,18 +44,19 @@ public final class DialogUserNotification implements UserNotification {
     }
 
     private boolean noDialogVisible() {
-        ExceptionDetailsDialog dialog = this.dialogReference.get();
-        return dialog == null || dialog.getShell() == null || dialog.getShell().isDisposed();
+        DialogController controller = this.dialogControllerReference.get();
+        return controller == null || controller.getDialog() == null || controller.getDialog().getShell() == null || controller.getDialog().getShell().isDisposed();
     }
 
     private void showNewDialog(Shell shell, final String headline, final String message, final String details, final int severity, final Throwable throwable) {
-        ExceptionDetailsDialog dialog = new ExceptionDetailsDialog(shell, headline, message, details, severity, throwable);
-        this.dialogReference.set(dialog);
-        dialog.open();
+        DialogController controller = ExceptionDetailsDialog.create(shell, headline, message, details, severity, throwable);
+        this.dialogControllerReference.set(controller);
+        controller.getDialog().setBlockOnOpen(false);
+        controller.openDialog();
     }
 
     private void addThrowableToDialog(final Throwable throwable) {
-        this.dialogReference.get().addException(throwable);
+        this.dialogControllerReference.get().addException(throwable);
     }
 
 }

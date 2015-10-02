@@ -17,6 +17,7 @@ import java.io.Writer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.FluentIterable;
@@ -46,14 +47,13 @@ import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
-import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Text;
+import org.eclipse.swt.widgets.Widget;
 import org.eclipse.ui.ISharedImages;
 import org.eclipse.ui.PlatformUI;
 
-import org.eclipse.buildship.core.GradlePluginsRuntimeException;
 import org.eclipse.buildship.ui.UiPlugin;
 import org.eclipse.buildship.ui.i18n.UiMessages;
 import org.eclipse.buildship.ui.util.font.FontUtils;
@@ -63,17 +63,13 @@ import org.eclipse.buildship.ui.util.font.FontUtils;
  */
 public final class ExceptionDetailsDialog extends Dialog {
 
-    private static final String LINE_SEPARATOR = System.getProperty("line.separator"); //$NON-NLS-1$
     private static final int COPY_EXCEPTION_BUTTON_ID = 25;
 
-    private final Image image;
-    private final String title;
-    private final String message;
-    private final String details;
-    private final Collection<Throwable> throwables;
+    private final DialogController controller;
 
+    private Image image;
     private Button detailsButton;
-    private Control stackTraceAreaControl;
+    private Composite stackTraceAreaControl;
     private Label singleErrorMessageLabel;
     private TableViewer multiErrorExceptionList;
     private Label singleErrorDetailsLabel;
@@ -84,45 +80,11 @@ public final class ExceptionDetailsDialog extends Dialog {
     private Composite multiErrorContainer;
     private StackLayout stackLayout;
 
-    public ExceptionDetailsDialog(Shell shell, String title, String message, String details, int severity, Throwable throwable) {
+    private ExceptionDetailsDialog(DialogController controller, Shell shell, int severity) {
         super(new SameShellProvider(shell));
-
+        this.controller = Preconditions.checkNotNull(controller);
         this.image = getIconForSeverity(severity, shell);
-        this.title = Preconditions.checkNotNull(title);
-        this.message = Preconditions.checkNotNull(message);
-        this.details = Preconditions.checkNotNull(details);
-        this.throwables = new ArrayList<Throwable>(Arrays.asList(throwable));
-
         setShellStyle(SWT.DIALOG_TRIM | SWT.RESIZE | SWT.APPLICATION_MODAL);
-    }
-
-    private Image getIconForSeverity(int severity, Shell shell) {
-        int swtImageKey;
-        switch (severity) {
-            case IStatus.OK:
-            case IStatus.INFO:
-                swtImageKey = SWT.ICON_INFORMATION;
-                break;
-            case IStatus.WARNING:
-            case IStatus.CANCEL:
-                swtImageKey = SWT.ICON_WARNING;
-                break;
-            case IStatus.ERROR:
-                swtImageKey = SWT.ICON_ERROR;
-                break;
-            default:
-                swtImageKey = SWT.ICON_WARNING;
-                UiPlugin.logger().error("Can't find image for severity: " + severity);
-        }
-
-        return shell.getDisplay().getSystemImage(swtImageKey);
-    }
-
-    @Override
-    protected void configureShell(Shell shell) {
-        super.configureShell(shell);
-        // set dialog box title
-        shell.setText(this.title);
     }
 
     @Override
@@ -186,8 +148,9 @@ public final class ExceptionDetailsDialog extends Dialog {
         // multi error messages displayed in a list viewer
         GridData multiErrorExceptionListGridData = new GridData();
         multiErrorExceptionListGridData.horizontalAlignment = SWT.FILL;
-        multiErrorExceptionListGridData.verticalAlignment = SWT.TOP;
+        multiErrorExceptionListGridData.verticalAlignment = SWT.FILL;
         multiErrorExceptionListGridData.grabExcessHorizontalSpace = true;
+        multiErrorExceptionListGridData.grabExcessVerticalSpace = true;
         multiErrorExceptionListGridData.widthHint = 800;
         this.multiErrorExceptionList = new TableViewer(this.multiErrorContainer, SWT.MULTI);
         this.multiErrorExceptionList.getControl().setLayoutData(multiErrorExceptionListGridData);
@@ -207,11 +170,7 @@ public final class ExceptionDetailsDialog extends Dialog {
 
             @Override
             public void selectionChanged(SelectionChangedEvent event) {
-                if (ExceptionDetailsDialog.this.stacktraceAreaText != null && ExceptionDetailsDialog.this.stacktraceAreaText.isDisposed()) {
-                    ISelection selection = event.getSelection();
-                    String stackTraces = collectStackTraces(collectSelectedExceptions(selection));
-                    ExceptionDetailsDialog.this.stacktraceAreaText.setText(stackTraces);
-                }
+                ExceptionDetailsDialog.this.controller.updateStacktraceArea();
             }
         });
 
@@ -219,16 +178,40 @@ public final class ExceptionDetailsDialog extends Dialog {
         this.clipboard = new Clipboard(getShell().getDisplay());
 
         // after widget creation update the contents
-        updateWidgetText();
-        updatePresentationMode();
+        this.controller.updateMessages();
+        this.controller.updatePresentatationMode();
 
         return dialogArea;
+    }
+
+    private Image getIconForSeverity(int severity, Shell shell) {
+        int swtImageKey;
+        switch (severity) {
+            case IStatus.OK:
+            case IStatus.INFO:
+                swtImageKey = SWT.ICON_INFORMATION;
+                break;
+            case IStatus.WARNING:
+            case IStatus.CANCEL:
+                swtImageKey = SWT.ICON_WARNING;
+                break;
+            case IStatus.ERROR:
+                swtImageKey = SWT.ICON_ERROR;
+                break;
+            default:
+                // display a warning image if if unknown severity is requested
+                swtImageKey = SWT.ICON_WARNING;
+                UiPlugin.logger().error("Can't find image for severity: " + severity);
+        }
+
+        return shell.getDisplay().getSystemImage(swtImageKey);
     }
 
     @Override
     protected void createButtonsForButtonBar(Composite parent) {
         Button copyExceptionButton = createButton(parent, COPY_EXCEPTION_BUTTON_ID, "", false);
         copyExceptionButton.setToolTipText(UiMessages.Button_CopyFailuresToClipboard_Tooltip);
+
         copyExceptionButton.setImage(PlatformUI.getWorkbench().getSharedImages().getImage(ISharedImages.IMG_TOOL_COPY));
         this.detailsButton = createButton(parent, IDialogConstants.DETAILS_ID, IDialogConstants.SHOW_DETAILS_LABEL, false);
         Button okButton = createButton(parent, IDialogConstants.OK_ID, IDialogConstants.OK_LABEL, true);
@@ -258,104 +241,15 @@ public final class ExceptionDetailsDialog extends Dialog {
     @Override
     protected void buttonPressed(int id) {
         if (id == IDialogConstants.DETAILS_ID) {
-            toggleStacktraceArea();
+            this.controller.toggleStacktraceArea();
         } else if (id == COPY_EXCEPTION_BUTTON_ID) {
-            copyErrorToClipboard();
+            this.controller.copyStacktracesToClipboard();
         } else {
             super.buttonPressed(id);
         }
     }
 
-    /**
-     * Adds the target exception to the dialog.
-     *
-     * @param exception the new exception to display.
-     */
-    public void addException(final Throwable exception) {
-        Display display = PlatformUI.getWorkbench().getDisplay();
-        Thread displayThread = display.getThread();
-
-        if (Thread.currentThread().equals(displayThread)) {
-            addExceptionInUiThread(exception);
-        } else {
-           throw new GradlePluginsRuntimeException("This method must be called from the UI thread");
-        }
-    }
-
-    private void addExceptionInUiThread(Throwable exception) {
-        // the exception list always manipulated from the UI thread, therefore no synchronization
-        // is necessary
-        this.throwables.add(exception);
-        if (getContents() != null && !getContents().isDisposed()) {
-            updateWidgetText();
-            updatePresentationMode();
-            relayoutShell();
-        }
-    }
-
-    private Collection<Throwable> collectSelectedExceptions(ISelection selection) {
-        if (selection instanceof IStructuredSelection) {
-            @SuppressWarnings("unchecked")
-            Collection<Throwable> selectedExceptions = FluentIterable.from(((IStructuredSelection) selection).toList()).filter(Throwable.class).toList();
-            if (!selectedExceptions.isEmpty()) {
-                return selectedExceptions;
-            }
-        }
-        // if nothing is selected, then return all available exceptions
-        return this.throwables;
-    }
-
-    private void updatePresentationMode() {
-        if (this.throwables.size() > 1) {
-            this.stackLayout.topControl = this.multiErrorContainer;
-            getShell().setText(UiMessages.Dialog_Title_Multiple_Error);
-        } else {
-            this.stackLayout.topControl = this.singleErrorContainer;
-            getShell().setText(this.title);
-        }
-    }
-
-    private void copyErrorToClipboard() {
-        StringBuilder sb = new StringBuilder();
-        sb.append(this.message);
-        sb.append(LINE_SEPARATOR);
-        sb.append(this.details);
-        sb.append(LINE_SEPARATOR);
-        sb.append(collectStackTraces(this.throwables));
-
-        this.clipboard.setContents(new String[] { sb.toString() }, new Transfer[] { TextTransfer.getInstance() });
-    }
-
-    private void toggleStacktraceArea() {
-        // show/hide stacktrace
-        if (this.stackTraceAreaControl == null) {
-            this.stackTraceAreaControl = createStacktraceArea((Composite) getContents());
-            this.detailsButton.setText(IDialogConstants.HIDE_DETAILS_LABEL);
-        } else {
-            this.stackTraceAreaControl.dispose();
-            this.stackTraceAreaControl = null;
-            this.detailsButton.setText(IDialogConstants.SHOW_DETAILS_LABEL);
-        }
-
-        relayoutShell();
-    }
-
-    private Control createStacktraceArea(Composite parent) {
-        // create the stacktrace container area
-        Composite container = new Composite(parent, SWT.NONE);
-        container.setLayoutData(new GridData(GridData.FILL_BOTH));
-        GridLayout containerLayout = new GridLayout();
-        containerLayout.marginHeight = containerLayout.marginWidth = 0;
-        container.setLayout(containerLayout);
-
-        this.stacktraceAreaText = new Text(container, SWT.MULTI | SWT.READ_ONLY | SWT.BORDER | SWT.H_SCROLL | SWT.V_SCROLL);
-        this.stacktraceAreaText.setLayoutData(new GridData(GridData.FILL_BOTH));
-        this.stacktraceAreaText.setText(collectStackTraces(collectSelectedExceptions(this.multiErrorExceptionList.getSelection())));
-
-        return container;
-    }
-
-    private void relayoutShell() {
+    void relayoutShell() {
         // compute the new window size
         Point oldSize = getContents().getSize();
         Point newSize = getContents().computeSize(SWT.DEFAULT, SWT.DEFAULT);
@@ -383,21 +277,214 @@ public final class ExceptionDetailsDialog extends Dialog {
         return super.close();
     }
 
-    private void updateWidgetText() {
-        this.singleErrorMessageLabel.setText(this.message);
-        this.singleErrorDetailsLabel.setText(this.details);
-        this.multiErrorMessageLabel.setText(this.message);
-        this.multiErrorExceptionList.setInput(this.throwables);
+    void updateMessageText(String message) {
+        if (widgetAccessible(this.singleErrorMessageLabel)) {
+            this.singleErrorMessageLabel.setText(message);
+        }
+        if (widgetAccessible(this.multiErrorMessageLabel)) {
+            this.multiErrorMessageLabel.setText(message);
+        }
     }
 
-    private static String collectStackTraces(Collection<Throwable> throwables) {
-        Writer writer = new StringWriter(1024);
-        PrintWriter printWriter = new PrintWriter(writer);
-        for (Throwable throwable : throwables) {
-            throwable.printStackTrace(printWriter);
-            printWriter.write(LINE_SEPARATOR);
+    void updateDetailsText(String details) {
+        if (widgetAccessible(this.singleErrorContainer)) {
+            this.singleErrorDetailsLabel.setText(details);
         }
-        return writer.toString();
+    }
+
+    void updateDisplayedThrowables(Collection<Throwable> throwables) {
+        if (this.multiErrorExceptionList != null && widgetAccessible(this.multiErrorExceptionList.getControl())) {
+            this.multiErrorExceptionList.setInput(throwables);
+        }
+    }
+
+    void updateStacktraceAreText(String stacktrace) {
+        if (widgetAccessible(this.stackTraceAreaControl)) {
+            this.stacktraceAreaText.setText(stacktrace);
+        }
+    }
+
+    void showSingleException(String title) {
+        if (this.stackLayout != null && widgetAccessible(getShell())) {
+            this.stackLayout.topControl = this.singleErrorContainer;
+            getShell().setText(title);
+            this.singleErrorContainer.getParent().layout();
+        }
+    }
+
+    void showMultiException(String title) {
+        if (this.stackLayout != null && widgetAccessible(getShell())) {
+            this.stackLayout.topControl = this.multiErrorContainer;
+            getShell().setText(title);
+            this.multiErrorContainer.getParent().layout();
+        }
+    }
+
+    private boolean widgetAccessible(Widget widget) {
+        return widget != null && !widget.isDisposed();
+    }
+
+    boolean isStacktraceAreaVisible() {
+        return this.stackTraceAreaControl != null;
+    }
+
+    void showStacktraceArea() {
+        // create the stacktrace container area
+        this.stackTraceAreaControl = new Composite((Composite) getContents(), SWT.NONE);
+        this.stackTraceAreaControl.setLayoutData(new GridData(GridData.FILL_BOTH));
+        GridLayout containerLayout = new GridLayout();
+        containerLayout.marginHeight = containerLayout.marginWidth = 0;
+        this.stackTraceAreaControl.setLayout(containerLayout);
+
+        //  the text inside the stacktrace area
+        this.stacktraceAreaText = new Text(this.stackTraceAreaControl, SWT.MULTI | SWT.READ_ONLY | SWT.BORDER | SWT.H_SCROLL | SWT.V_SCROLL);
+        this.stacktraceAreaText.setLayoutData(new GridData(GridData.FILL_BOTH));
+
+        // update
+        this.detailsButton.setText(IDialogConstants.HIDE_DETAILS_LABEL);
+    }
+
+    void hideStacktraceArea() {
+        this.stackTraceAreaControl.dispose();
+        this.stackTraceAreaControl = null;
+        this.detailsButton.setText(IDialogConstants.SHOW_DETAILS_LABEL);
+    }
+
+    Collection<Throwable> getSelectedExceptionsFromList() {
+        if (this.multiErrorExceptionList != null && widgetAccessible(this.multiErrorExceptionList.getControl())) {
+            ISelection selection = this.multiErrorExceptionList.getSelection();
+            if (selection instanceof IStructuredSelection) {
+                @SuppressWarnings("unchecked")
+                Collection<Throwable> selectedExceptions = FluentIterable.from(((IStructuredSelection) selection).toList()).filter(Throwable.class).toList();
+                if (!selectedExceptions.isEmpty()) {
+                    return selectedExceptions;
+                }
+            }
+        }
+        // if nothing is selected, then return all available exceptions
+        return Collections.emptyList();
+    }
+
+    void setClipboardContent(String content) {
+        if (this.clipboard != null && !this.clipboard.isDisposed()) {
+            this.clipboard.setContents(new String[] { content }, new Transfer[] { TextTransfer.getInstance() });
+        }
+    }
+
+    public static DialogController create(Shell shell, String title, String message, String details, int severity, Throwable throwable) {
+        return new DialogController(shell, title, message, details, severity, throwable);
+    }
+
+    /**
+     * Controller object to create {@link ExceptionDetailsDialog} instances and assign new
+     * exceptions to it.
+     * <p/>
+     * This class should be accessed only form the UI thread.
+     */
+    public static final class DialogController {
+
+        private static final String LINE_SEPARATOR = System.getProperty("line.separator"); //$NON-NLS-1$
+
+        private final String title;
+        private final String message;
+        private final String details;
+        private final ArrayList<Throwable> throwables;
+
+        private final ExceptionDetailsDialog dialog;
+
+        private DialogController(Shell shell, String title, String message, String details, int severity, Throwable throwable) {
+            this.title = Preconditions.checkNotNull(title);
+            this.message = Preconditions.checkNotNull(message);
+            this.details = Preconditions.checkNotNull(details);
+            this.throwables = new ArrayList<Throwable>(Arrays.asList(throwable));
+            this.dialog = new ExceptionDetailsDialog(this, shell, severity);
+        }
+
+        /**
+         * Returns the contained dialog object.
+         *
+         * @return the contained dialog
+         */
+        public Dialog getDialog() {
+            return this.dialog;
+        }
+
+        /**
+         * Opens the dialog.
+         */
+        public void openDialog() {
+            this.dialog.open();
+        }
+
+        /**
+         * Adds the target exception to the dialog.
+         *
+         * @param exception the new exception to display.
+         */
+        public void addException(final Throwable exception) {
+            // save the new exceptions
+            this.throwables.add(exception);
+
+            if (this.dialog.getContents() != null) {
+                // update the the widget content
+                updateMessages();
+
+                // update the presentation mode
+                updatePresentatationMode();
+            }
+        }
+
+        private void updatePresentatationMode() {
+            if (this.throwables.size() > 1) {
+                this.dialog.showMultiException(UiMessages.Dialog_Title_Multiple_Error);
+            } else {
+                this.dialog.showSingleException(this.title);
+            }
+        }
+
+        private void updateStacktraceArea() {
+            Collection<Throwable> selectedExceptions = this.dialog.getSelectedExceptionsFromList();
+            if (selectedExceptions.isEmpty()) {
+                selectedExceptions = this.throwables;
+            }
+            this.dialog.updateStacktraceAreText(collectStackTraces(selectedExceptions));
+        }
+
+        private String collectStackTraces(Collection<Throwable> throwables) {
+            Writer writer = new StringWriter(1024);
+            PrintWriter printWriter = new PrintWriter(writer);
+            for (Throwable throwable : throwables) {
+                throwable.printStackTrace(printWriter);
+                printWriter.write(LINE_SEPARATOR);
+            }
+            return writer.toString();
+        }
+
+        private void toggleStacktraceArea() {
+            if (this.dialog.isStacktraceAreaVisible()) {
+                this.dialog.hideStacktraceArea();
+            } else {
+                this.dialog.showStacktraceArea();
+                updateStacktraceArea();
+            }
+            this.dialog.relayoutShell();
+        }
+
+        private void copyStacktracesToClipboard() {
+            StringBuilder sb = new StringBuilder();
+            sb.append(this.message);
+            sb.append(LINE_SEPARATOR);
+            sb.append(this.details);
+            sb.append(LINE_SEPARATOR);
+            sb.append(collectStackTraces(this.throwables));
+            this.dialog.setClipboardContent(sb.toString());
+        }
+
+        private void updateMessages() {
+            this.dialog.updateMessageText(this.message);
+            this.dialog.updateDetailsText(this.details);
+            this.dialog.updateDisplayedThrowables(this.throwables);
+        }
     }
 
 }
