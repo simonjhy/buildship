@@ -49,14 +49,14 @@ public class LimitationsTest {
     public void someLimitationWhenUsingFinalVersionOf24() {
         Limitations limitations = new Limitations(GradleVersion.version("2.4"));
         List<Pair<GradleVersion, String>> limitationDetails = limitations.getLimitations();
-        assertEquals(limitationDetails.size(), 4);
+        assertEquals(limitationDetails.size(), 5);
     }
 
     @Test
     public void someLimitationWhenUsingSnapshotVersionOf24() {
         Limitations limitations = new Limitations(GradleVersion.version("2.4-20150101053008+0000"));
         List<Pair<GradleVersion, String>> limitationDetails = limitations.getLimitations();
-        assertEquals(limitationDetails.size(), 4);
+        assertEquals(limitationDetails.size(), 5);
     }
 
 }
