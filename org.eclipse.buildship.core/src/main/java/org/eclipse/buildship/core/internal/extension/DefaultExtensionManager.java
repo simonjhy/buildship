@@ -13,13 +13,12 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 
-import com.google.common.annotations.VisibleForTesting;
-
+import org.eclipse.buildship.core.internal.CorePlugin;
+import org.eclipse.buildship.core.invocation.InvocationCustomizer;
 import org.eclipse.core.runtime.IConfigurationElement;
 import org.eclipse.core.runtime.Platform;
 
-import org.eclipse.buildship.core.internal.CorePlugin;
-import org.eclipse.buildship.core.invocation.InvocationCustomizer;
+import com.google.common.annotations.VisibleForTesting;
 
 public class DefaultExtensionManager implements ExtensionManager {
 
@@ -51,5 +50,16 @@ public class DefaultExtensionManager implements ExtensionManager {
     @VisibleForTesting
     Collection<IConfigurationElement> loadElements(String extensionPointName) {
         return Arrays.asList(Platform.getExtensionRegistry().getConfigurationElementsFor(CorePlugin.PLUGIN_ID, extensionPointName));
+    }
+
+    @Override
+    public List<BuildExecutionParticipantContribution> loadBuildExecutionParticipants() {
+        Collection<IConfigurationElement> elements = loadElements("executionparticipants");
+        List<BuildExecutionParticipantContribution> result = new ArrayList<>(elements.size());
+        for (IConfigurationElement element : elements) {
+            BuildExecutionParticipantContribution contribution = BuildExecutionParticipantContribution.from(element);
+            result.add(contribution);
+        }
+        return result;
     }
 }
