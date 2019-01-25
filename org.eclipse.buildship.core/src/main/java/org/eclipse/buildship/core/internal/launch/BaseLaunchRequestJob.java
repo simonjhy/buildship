@@ -11,15 +11,9 @@
 
 package org.eclipse.buildship.core.internal.launch;
 
-import org.gradle.tooling.CancellationTokenSource;
-import org.gradle.tooling.LongRunningOperation;
+import java.util.Set;
 
-import com.google.common.base.Objects;
-import com.google.common.base.Preconditions;
-
-import org.eclipse.core.runtime.IProgressMonitor;
-import org.eclipse.core.runtime.jobs.Job;
-
+import org.eclipse.buildship.core.BuildExecutionParticipant;
 import org.eclipse.buildship.core.internal.CorePlugin;
 import org.eclipse.buildship.core.internal.configuration.RunConfiguration;
 import org.eclipse.buildship.core.internal.console.ProcessDescription;
@@ -27,6 +21,13 @@ import org.eclipse.buildship.core.internal.event.Event;
 import org.eclipse.buildship.core.internal.gradle.GradleProgressAttributes;
 import org.eclipse.buildship.core.internal.operation.ToolingApiJob;
 import org.eclipse.buildship.core.internal.workspace.InternalGradleBuild;
+import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.jobs.Job;
+import org.gradle.tooling.CancellationTokenSource;
+import org.gradle.tooling.LongRunningOperation;
+
+import com.google.common.base.Objects;
+import com.google.common.base.Preconditions;
 
 /**
  * Base class to execute Gradle builds in a job.
@@ -46,18 +47,29 @@ public abstract class BaseLaunchRequestJob<T extends LongRunningOperation> exten
     }
 
     protected final void executeLaunch(CancellationTokenSource tokenSource, final IProgressMonitor monitor) throws Exception {
-        // todo (etst) close streams when done
-
-        BuildExecutionParticipants.activateParticipantPlugins();
+        BuildExecutionParticipants buildParticipants = BuildExecutionParticipants.create(CorePlugin.extensionManager().loadBuildExecutionParticipants());
+        
         monitor.beginTask(getJobTaskName(), IProgressMonitor.UNKNOWN);
 
         ProcessDescription processDescription = createProcessDescription();
         RunConfiguration runConfig = getRunConfig();
+        
         InternalGradleBuild gradleBuild = CorePlugin.internalGradleWorkspace().getGradleBuild(runConfig.getProjectConfiguration().getBuildConfiguration());
+
+        runConfig.getTasks().stream().forEach(
+            task -> {
+                Set<BuildExecutionParticipant> buildExecutionParticipant = buildParticipants.getBuildExecutionParticipant(task);
+
+                buildExecutionParticipant.stream().forEach(
+                    buildParticipant -> buildParticipant.preAction(runConfig.getProjectConfiguration().getProjectDir(), task, monitor)
+                );
+            }
+        );
+
         GradleProgressAttributes attributes = GradleProgressAttributes.builder(tokenSource, monitor)
-                .forDedicatedProcess(processDescription)
-                .withFullProgress()
-                .build();
+            .forDedicatedProcess(processDescription)
+            .withFullProgress()
+            .build();
         T launcher = createLaunch(gradleBuild, runConfig, attributes, processDescription);
 
         writeExtraConfigInfo(attributes);

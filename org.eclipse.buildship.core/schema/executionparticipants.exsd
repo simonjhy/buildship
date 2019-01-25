@@ -19,7 +19,7 @@
       </annotation>
       <complexType>
          <choice minOccurs="1" maxOccurs="unbounded">
-            <element ref="plugin"/>
+            <element ref="buildparticipant"/>
          </choice>
          <attribute name="point" type="string" use="required">
             <annotation>
@@ -45,11 +45,29 @@
       </complexType>
 </element>
 
-<element name="plugin">
+<element name="buildparticipant">
       <complexType>
          <attribute name="id" type="string" use="required">
             <annotation>
                <documentation>
+                  Unique identifier for the build participant.
+               </documentation>
+            </annotation>
+         </attribute>
+         <attribute name="class" type="string" use="required">
+            <annotation>
+               <documentation>
+                  The project build participant implementation
+               </documentation>
+               <appinfo>
+                  <meta.attribute kind="java" basedOn=":org.eclipse.buildship.core.BuildExecutionParticipant"/>
+               </appinfo>
+            </annotation>
+         </attribute>
+         <attribute name="tasks" type="string">
+            <annotation>
+               <documentation>
+                  A comma-separated list of tasks name.
                </documentation>
             </annotation>
          </attribute>

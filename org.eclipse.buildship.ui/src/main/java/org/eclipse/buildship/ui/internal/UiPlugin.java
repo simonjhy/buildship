@@ -16,19 +16,6 @@ import java.util.Dictionary;
 import java.util.Hashtable;
 import java.util.Map;
 
-import org.osgi.framework.BundleContext;
-import org.osgi.framework.Constants;
-import org.osgi.framework.ServiceReference;
-import org.osgi.framework.ServiceRegistration;
-
-import com.google.common.collect.Maps;
-
-import org.eclipse.core.runtime.Platform;
-import org.eclipse.debug.core.DebugPlugin;
-import org.eclipse.jface.resource.ImageRegistry;
-import org.eclipse.ui.PlatformUI;
-import org.eclipse.ui.plugin.AbstractUIPlugin;
-
 import org.eclipse.buildship.core.internal.CorePlugin;
 import org.eclipse.buildship.core.internal.CoreTraceScopes;
 import org.eclipse.buildship.core.internal.Logger;
@@ -39,8 +26,20 @@ import org.eclipse.buildship.core.internal.util.logging.EclipseLogger;
 import org.eclipse.buildship.ui.internal.console.ConsoleProcessStreamsProvider;
 import org.eclipse.buildship.ui.internal.launch.ConsoleShowingLaunchListener;
 import org.eclipse.buildship.ui.internal.launch.UiGradleLaunchConfigurationManager;
+import org.eclipse.buildship.ui.internal.view.execution.ExecutionParticipantLaunchRequestListener;
 import org.eclipse.buildship.ui.internal.view.execution.ExecutionShowingLaunchRequestListener;
 import org.eclipse.buildship.ui.internal.workspace.ShutdownListener;
+import org.eclipse.core.runtime.Platform;
+import org.eclipse.debug.core.DebugPlugin;
+import org.eclipse.jface.resource.ImageRegistry;
+import org.eclipse.ui.PlatformUI;
+import org.eclipse.ui.plugin.AbstractUIPlugin;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.Constants;
+import org.osgi.framework.ServiceReference;
+import org.osgi.framework.ServiceRegistration;
+
+import com.google.common.collect.Maps;
 
 /**
  * The plug-in runtime class for the Gradle integration plug-in containing the UI-related elements.
@@ -63,6 +62,7 @@ public final class UiPlugin extends AbstractUIPlugin {
     private ServiceRegistration gradleLaunchConfigurationService;
     private ConsoleShowingLaunchListener consoleShowingLaunchListener;
     private ExecutionShowingLaunchRequestListener executionShowingLaunchRequestListener;
+    private ExecutionParticipantLaunchRequestListener executionParticipantLaunchRequestListener;
     private ShutdownListener shutdownListener;
 
     @Override
@@ -131,6 +131,9 @@ public final class UiPlugin extends AbstractUIPlugin {
 
         this.executionShowingLaunchRequestListener = new ExecutionShowingLaunchRequestListener();
         CorePlugin.listenerRegistry().addEventListener(this.executionShowingLaunchRequestListener);
+        
+        this.executionParticipantLaunchRequestListener = new ExecutionParticipantLaunchRequestListener();
+        CorePlugin.listenerRegistry().addEventListener(this.executionParticipantLaunchRequestListener);
 
         PlatformUI.getWorkbench().addWorkbenchListener(this.shutdownListener = new ShutdownListener());
     }
@@ -139,6 +142,7 @@ public final class UiPlugin extends AbstractUIPlugin {
     private void unregisterListeners() {
         PlatformUI.getWorkbench().removeWorkbenchListener(this.shutdownListener);
         CorePlugin.listenerRegistry().removeEventListener(this.executionShowingLaunchRequestListener);
+        CorePlugin.listenerRegistry().removeEventListener(this.executionParticipantLaunchRequestListener);
         DebugPlugin.getDefault().getLaunchManager().removeLaunchListener(this.consoleShowingLaunchListener);
     }
 
