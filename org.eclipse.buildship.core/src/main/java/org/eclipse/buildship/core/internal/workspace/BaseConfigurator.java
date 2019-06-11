@@ -13,10 +13,13 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import org.gradle.tooling.model.eclipse.EclipseProject;
-
-import com.google.common.collect.ImmutableList;
-
+import org.eclipse.buildship.core.GradleBuild;
+import org.eclipse.buildship.core.InitializationContext;
+import org.eclipse.buildship.core.ProjectConfigurator;
+import org.eclipse.buildship.core.ProjectContext;
+import org.eclipse.buildship.core.internal.CorePlugin;
+import org.eclipse.buildship.core.internal.preferences.PersistentModel;
+import org.eclipse.buildship.core.internal.util.gradle.HierarchicalElementUtils;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IWorkspaceRunnable;
 import org.eclipse.core.runtime.CoreException;
@@ -27,13 +30,9 @@ import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.JavaModelException;
+import org.gradle.tooling.model.eclipse.EclipseProject;
 
-import org.eclipse.buildship.core.GradleBuild;
-import org.eclipse.buildship.core.InitializationContext;
-import org.eclipse.buildship.core.ProjectConfigurator;
-import org.eclipse.buildship.core.ProjectContext;
-import org.eclipse.buildship.core.internal.CorePlugin;
-import org.eclipse.buildship.core.internal.util.gradle.HierarchicalElementUtils;
+import com.google.common.collect.ImmutableList;
 public class BaseConfigurator implements ProjectConfigurator {
 
     private Map<File, EclipseProject> locationToProject;
@@ -79,6 +78,20 @@ public class BaseConfigurator implements ProjectConfigurator {
 
         // TODO (donat) extract Java synchronization to external configurator
         if (isJavaProject(model)) {
+
+            PersistentModel previousModel = persistentModel.getPrevious();
+
+            if (previousModel.isPresent()) {
+                if ( previousModel.getClasspath() == null) {
+                    persistentModel.classpath(ImmutableList.<IClasspathEntry>of());
+                }
+
+                PersistentModel newModel = persistentModel.build();
+                if ( newModel.equals(previousModel)){
+                    return;
+                }
+            }
+
             synchronizeJavaProject(context, model, project, persistentModel, progress);
         } else {
             persistentModel.classpath(ImmutableList.<IClasspathEntry>of());
